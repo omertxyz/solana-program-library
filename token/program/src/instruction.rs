@@ -20,7 +20,7 @@ pub const MIN_SIGNERS: usize = 1;
 pub const MAX_SIGNERS: usize = 11;
 
 mod coption_serde {
-    use std::{fmt, str::FromStr};
+    use std::{fmt::{self, Display}, str::FromStr, marker::PhantomData};
 
     use serde::{
         de::{Error, Visitor, Unexpected},
@@ -28,9 +28,9 @@ mod coption_serde {
     };
     use solana_program::{program_option::COption, pubkey::Pubkey};
 
-    pub fn serialize<S>(x: &COption<Pubkey>, s: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S, T>(x: &COption<T>, s: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer,
+        S: Serializer, T: Display
     {
         match *x {
             COption::Some(ref value) => s.serialize_some(&value.to_string()),
@@ -38,10 +38,12 @@ mod coption_serde {
         }
     }
 
-    struct COptionVisitor;
+    struct COptionVisitor<T> {
+        s: PhantomData<T>,
+    }
 
-    impl<'de> Visitor<'de> for COptionVisitor {
-        type Value = COption<Pubkey>;
+    impl<'de, T> Visitor<'de> for COptionVisitor<T>  where T: FromStr {
+        type Value = COption<T>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter.write_str("a pubkey string")
@@ -57,7 +59,7 @@ mod coption_serde {
         fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
             where
                 E: Error, {
-            Pubkey::from_str(&v).map(|r| COption::Some(r)).map_err(|_| E::invalid_value(Unexpected::Str(v), &"pubkey string"))
+            T::from_str(&v).map(|r| COption::Some(r)).map_err(|_| E::invalid_value(Unexpected::Str(v), &"pubkey string"))
         }
 
         fn visit_none<E>(self) -> Result<Self::Value, E>
@@ -71,7 +73,7 @@ mod coption_serde {
     where
         D: Deserializer<'de>,
     {
-        d.deserialize_option(COptionVisitor)
+        d.deserialize_option(COptionVisitor {s: PhantomData::default()})
     }
 }
 
