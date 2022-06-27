@@ -11,14 +11,74 @@ use solana_program::{
 use std::convert::TryInto;
 use std::mem::size_of;
 
+use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DisplayFromStr};
+
 /// Minimum number of multisignature signers (min N)
 pub const MIN_SIGNERS: usize = 1;
 /// Maximum number of multisignature signers (max N)
 pub const MAX_SIGNERS: usize = 11;
 
+mod coption_serde {
+    use std::{fmt, str::FromStr};
+
+    use serde::{
+        de::{Error, Visitor, Unexpected},
+        Deserializer, Serializer,
+    };
+    use solana_program::{program_option::COption, pubkey::Pubkey};
+
+    pub fn serialize<S>(x: &COption<Pubkey>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match *x {
+            COption::Some(ref value) => s.serialize_some(&value.to_string()),
+            COption::None => s.serialize_none(),
+        }
+    }
+
+    struct COptionVisitor;
+
+    impl<'de> Visitor<'de> for COptionVisitor {
+        type Value = COption<Pubkey>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a pubkey string")
+        }
+
+        fn visit_some<D>(self, d: D) -> Result<Self::Value, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            d.deserialize_str(self)
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: Error, {
+            Pubkey::from_str(&v).map(|r| COption::Some(r)).map_err(|_| E::invalid_value(Unexpected::Str(v), &"pubkey string"))
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: Error, {
+            Ok(COption::None)
+        }
+    }
+
+    pub fn deserialize<'de, D>(d: D) -> Result<COption<Pubkey>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        d.deserialize_option(COptionVisitor)
+    }
+}
+
 /// Instructions supported by the token program.
 #[repr(C)]
-#[derive(Clone, Debug, PartialEq)]
+#[serde_as]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum TokenInstruction {
     /// Initializes a new mint and optionally deposits all the newly minted
     /// tokens in an account.
@@ -38,8 +98,10 @@ pub enum TokenInstruction {
         /// Number of base 10 digits to the right of the decimal place.
         decimals: u8,
         /// The authority/multisignature to mint tokens.
+        #[serde_as(as = "DisplayFromStr")]
         mint_authority: Pubkey,
         /// The freeze authority/multisignature of the mint.
+        #[serde(with = "coption_serde")]
         freeze_authority: COption<Pubkey>,
     },
     /// Initializes a new account to hold tokens.  If this account is associated
@@ -154,6 +216,7 @@ pub enum TokenInstruction {
         /// The type of authority to update.
         authority_type: AuthorityType,
         /// The new authority
+        #[serde(with = "coption_serde")]
         new_authority: COption<Pubkey>,
     },
     /// Mints new tokens to an account.  The native mint does not support
@@ -361,6 +424,7 @@ pub enum TokenInstruction {
     ///   3. `[]` Rent sysvar
     InitializeAccount2 {
         /// The new account's owner/multisignature.
+        #[serde_as(as = "DisplayFromStr")]
         owner: Pubkey,
     },
     /// Given a wrapped / native token account (a token account containing SOL)
@@ -381,6 +445,7 @@ pub enum TokenInstruction {
     ///   1. `[]` The mint this account will be associated with.
     InitializeAccount3 {
         /// The new account's owner/multisignature.
+        #[serde_as(as = "DisplayFromStr")]
         owner: Pubkey,
     },
     /// Like InitializeMultisig, but does not require the Rent sysvar to be provided
@@ -405,8 +470,10 @@ pub enum TokenInstruction {
         /// Number of base 10 digits to the right of the decimal place.
         decimals: u8,
         /// The authority/multisignature to mint tokens.
+        #[serde_as(as = "DisplayFromStr")]
         mint_authority: Pubkey,
         /// The freeze authority/multisignature of the mint.
+        #[serde(with = "coption_serde")]
         freeze_authority: COption<Pubkey>,
     },
 }
@@ -664,7 +731,7 @@ impl TokenInstruction {
 
 /// Specifies the authority type for SetAuthority instructions
 #[repr(u8)]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum AuthorityType {
     /// Authority to mint new tokens
     MintTokens,
